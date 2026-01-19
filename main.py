@@ -12,7 +12,7 @@ from plyer import accelerometer
 from kivy.core.window import Window
 
 # --- CONFIG ---
-Window.rotation = 270 
+Window.rotation = 0
 Window.clearcolor = (0, 0, 0, 1)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
