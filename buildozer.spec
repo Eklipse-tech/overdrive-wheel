@@ -18,7 +18,7 @@ requirements = python3,kivy==2.2.1,plyer,pyjnius,android
 # (str) Presplash of the application
 # presplash.filename = %(source.dir)s/data/presplash.png
 # (str) Icon of the application
-# icon.filename = %(source.dir)s/wheel.png
+icon.filename = %(source.dir)s/icon.png
 
 # (list) Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,VIBRATE,WAKE_LOCK
