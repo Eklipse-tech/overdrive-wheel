@@ -3,6 +3,7 @@ from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -10,48 +11,40 @@ from kivy.uix.switch import Switch
 from kivy.clock import Clock
 from plyer import accelerometer
 from kivy.core.window import Window
+from kivy.metrics import dp
 
 # --- CONFIGURATION ---
-# 270 degrees usually fixes the "Upside Down" issue on landscape apps
-Window.rotation = 270 
-Window.clearcolor = (0.1, 0.1, 0.1, 1) # Dark Grey Background
+Window.clearcolor = (0.1, 0.1, 0.1, 1)
 
+# --- NETWORK ---
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-SERVER_PORT = 5000
-# This is a placeholder; you will type the real IP in the app
 SERVER_IP = "192.168.1.1" 
+SERVER_PORT = 5000
 
 def send_msg(msg):
     try:
         sock.sendto(msg.encode('utf-8'), (SERVER_IP, int(SERVER_PORT)))
     except: pass
 
-# --- CUSTOM TOUCHPAD (The Grey Box) ---
+# --- WIDGETS ---
 class TouchPad(Label):
     def on_touch_move(self, touch):
-        # Only move mouse if finger is inside this widget
         if self.collide_point(*touch.pos):
             send_msg(f"MOUSE_MOVE:{touch.dx},{touch.dy}")
 
-# --- SCREEN 1: LOGIN ---
 class LoginScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=50, spacing=20)
-        
-        # Title
+        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
         layout.add_widget(Label(text="OVERDRIVE", font_size='40sp', bold=True, color=(0, 0.9, 1, 1)))
         
-        # IP Input
         self.ip_input = TextInput(text="192.168.", multiline=False, font_size='30sp', size_hint=(1, 0.2),
                                   background_color=(0.2, 0.2, 0.2, 1), foreground_color=(1,1,1,1))
         layout.add_widget(self.ip_input)
         
-        # Connect Button
         btn = Button(text="START ENGINE", font_size='25sp', background_color=(0, 0.8, 0, 1), size_hint=(1, 0.3))
         btn.bind(on_press=self.connect)
         layout.add_widget(btn)
-        
         self.add_widget(layout)
 
     def connect(self, instance):
@@ -59,24 +52,56 @@ class LoginScreen(Screen):
         SERVER_IP = self.ip_input.text
         self.manager.current = 'game'
 
-# --- SCREEN 2: CONTROLLER ---
 class GameScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.layout = FloatLayout()
+        # We rotate the entire screen content to match the phone held sideways
+        self.rotation_layout = RelativeLayout()
         
-        # Gyro Toggle Switch
-        self.gyro_active = True
-        sw = Switch(active=True, size_hint=(None, None), size=(100, 50), 
-                    pos_hint={'center_x': 0.5, 'top': 0.95})
+        # Apply 90 degree rotation if phone is portrait
+        if Window.width < Window.height:
+            self.rotation_layout.canvas.before.clear()
+            with self.rotation_layout.canvas.before:
+                from kivy.graphics import Rotate, PushMatrix, PopMatrix, Translate
+                PushMatrix()
+                # Rotate around the center
+                Rotate(angle=-90, origin=self.center)
+                # Since we rotated, we need to swap width/height logic visually, 
+                # but Kivy makes this hard. 
+                # instead, we will just design for LANDSCAPE and let the user rotate the phone.
+            self.rotation_layout.canvas.after.add(PopMatrix())
+        
+        # --- THE MAIN LAYOUT ---
+        # We use a FloatLayout that assumes LANDSCAPE (Width > Height)
+        self.layout = FloatLayout()
+
+        # 1. TOP BAR (Pedals & Toggle)
+        # Gas (Right/Top side)
+        btn_gas = Button(text="GAS", pos_hint={'right': 0.98, 'center_y': 0.7}, size_hint=(0.25, 0.4), 
+                         background_color=(0,0.7,0,1), font_size='20sp', bold=True)
+        btn_gas.bind(on_press=lambda x: send_msg("BTN_RB:DOWN"))
+        btn_gas.bind(on_release=lambda x: send_msg("BTN_RB:UP"))
+        self.layout.add_widget(btn_gas)
+
+        # Brake (Left/Top side)
+        btn_brake = Button(text="BRAKE", pos_hint={'x': 0.02, 'center_y': 0.7}, size_hint=(0.25, 0.4), 
+                           background_color=(0.7,0,0,1), font_size='20sp', bold=True)
+        btn_brake.bind(on_press=lambda x: send_msg("BTN_LB:DOWN"))
+        btn_brake.bind(on_release=lambda x: send_msg("BTN_LB:UP"))
+        self.layout.add_widget(btn_brake)
+
+        # Gyro Toggle (Middle Top)
+        sw = Switch(active=True, size_hint=(None, None), size=(dp(100), dp(50)), 
+                    pos_hint={'center_x': 0.5, 'top': 0.98})
         sw.bind(active=self.toggle_gyro)
         self.layout.add_widget(sw)
 
-        # Touchpad (Center Grey Box)
+
+        # 2. CENTER ZONE (Touchpad & Mouse)
+        # Touchpad
         tp = TouchPad(text="TOUCHPAD", color=(1,1,1,0.2), 
-                      pos_hint={'center_x': 0.5, 'center_y': 0.55}, 
-                      size_hint=(0.25, 0.35))
-        # Draw background for Touchpad
+                      pos_hint={'center_x': 0.5, 'center_y': 0.5}, 
+                      size_hint=(0.3, 0.4))
         with tp.canvas.before:
             from kivy.graphics import Color, Rectangle
             Color(0.15, 0.15, 0.15, 1)
@@ -85,38 +110,57 @@ class GameScreen(Screen):
         tp.bind(size=lambda instance, value: setattr(self.tp_rect, 'size', instance.size))
         self.layout.add_widget(tp)
 
-        # Helper for creating buttons
-        def make_btn(text, pos, size, cmd, color=(0.3,0.3,0.3,1)):
-            btn = Button(text=text, pos_hint=pos, size_hint=size, 
-                         background_normal='', background_color=color, font_size='18sp', bold=True)
+        # Mouse Buttons (Below Touchpad)
+        btn_lmb = Button(text="LMB", pos_hint={'right': 0.49, 'top': 0.28}, size_hint=(0.14, 0.12))
+        btn_lmb.bind(on_press=lambda x: send_msg("LMB:DOWN"), on_release=lambda x: send_msg("LMB:UP"))
+        self.layout.add_widget(btn_lmb)
+
+        btn_rmb = Button(text="RMB", pos_hint={'x': 0.51, 'top': 0.28}, size_hint=(0.14, 0.12))
+        btn_rmb.bind(on_press=lambda x: send_msg("RMB:DOWN"), on_release=lambda x: send_msg("RMB:UP"))
+        self.layout.add_widget(btn_rmb)
+
+
+        # 3. D-PAD ZONE (Bottom Left) -> FIXED SQUARE CONTAINER
+        # We create a RelativeLayout to hold the D-Pad buttons together
+        dpad_zone = RelativeLayout(pos_hint={'x': 0.05, 'y': 0.05}, size_hint=(None, None), size=(dp(180), dp(180)))
+        
+        def make_dpad(text, px, py, cmd):
+            btn = Button(text=text, pos_hint={'center_x': px, 'center_y': py}, size_hint=(0.3, 0.3), background_color=(0.2,0.2,0.2,1))
             btn.bind(on_press=lambda x: send_msg(f"{cmd}:DOWN"))
             btn.bind(on_release=lambda x: send_msg(f"{cmd}:UP"))
-            self.layout.add_widget(btn)
-            return btn
+            dpad_zone.add_widget(btn)
 
-        # Mouse Buttons (Under Touchpad)
-        make_btn("LMB", {'right': 0.49, 'top': 0.36}, (0.12, 0.12), "LMB")
-        make_btn("RMB", {'x': 0.51, 'top': 0.36}, (0.12, 0.12), "RMB")
+        make_dpad("U", 0.5, 0.85, "BTN_UP")
+        make_dpad("D", 0.5, 0.15, "BTN_DOWN")
+        make_dpad("L", 0.15, 0.5, "BTN_LEFT")
+        make_dpad("R", 0.85, 0.5, "BTN_RIGHT")
+        self.layout.add_widget(dpad_zone)
 
-        # Driving Pedals (Big & Color Coded)
-        make_btn("BRAKE", {'x': 0.02, 'top': 0.98}, (0.3, 0.25), "BTN_LB", color=(0.7,0,0,1))
-        make_btn("GAS", {'right': 0.98, 'top': 0.98}, (0.3, 0.25), "BTN_RB", color=(0,0.7,0,1))
 
-        # Face Buttons (ABXY)
-        make_btn("Y", {'right': 0.85, 'y': 0.45}, (0.08, 0.15), "BTN_Y", color=(1,1,0,1)) # Yellow
-        make_btn("A", {'right': 0.85, 'y': 0.10}, (0.08, 0.15), "BTN_A", color=(0,1,0,1)) # Green
-        make_btn("X", {'right': 0.94, 'y': 0.28}, (0.08, 0.15), "BTN_X", color=(0,0,1,1)) # Blue
-        make_btn("B", {'right': 0.76, 'y': 0.28}, (0.08, 0.15), "BTN_B", color=(1,0,0,1)) # Red
+        # 4. ABXY ZONE (Bottom Right) -> FIXED SQUARE CONTAINER
+        face_zone = RelativeLayout(pos_hint={'right': 0.95, 'y': 0.05}, size_hint=(None, None), size=(dp(180), dp(180)))
 
-        # D-Pad
-        make_btn("U", {'x': 0.13, 'y': 0.45}, (0.08, 0.15), "BTN_UP")
-        make_btn("D", {'x': 0.13, 'y': 0.10}, (0.08, 0.15), "BTN_DOWN")
-        make_btn("L", {'x': 0.04, 'y': 0.28}, (0.08, 0.15), "BTN_LEFT")
-        make_btn("R", {'x': 0.22, 'y': 0.28}, (0.08, 0.15), "BTN_RIGHT")
-        
-        # Menu Buttons
-        make_btn("SELECT", {'center_x': 0.4, 'y': 0.05}, (0.15, 0.1), "BTN_SELECT")
-        make_btn("START", {'center_x': 0.6, 'y': 0.05}, (0.15, 0.1), "BTN_START")
+        def make_face(text, px, py, cmd, col):
+            btn = Button(text=text, pos_hint={'center_x': px, 'center_y': py}, size_hint=(0.3, 0.3), 
+                         background_color=col, background_normal='', font_size='20sp', bold=True)
+            btn.bind(on_press=lambda x: send_msg(f"{cmd}:DOWN"))
+            btn.bind(on_release=lambda x: send_msg(f"{cmd}:UP"))
+            face_zone.add_widget(btn)
+
+        make_face("Y", 0.5, 0.85, "BTN_Y", (1,1,0,1))
+        make_face("A", 0.5, 0.15, "BTN_A", (0,1,0,1))
+        make_face("X", 0.15, 0.5, "BTN_X", (0,0,1,1))
+        make_face("B", 0.85, 0.5, "BTN_B", (1,0,0,1))
+        self.layout.add_widget(face_zone)
+
+        # Start/Select (Tiny buttons in bottom center)
+        btn_sel = Button(text="SLCT", pos_hint={'center_x': 0.4, 'y': 0.02}, size_hint=(None, None), size=(dp(60), dp(40)))
+        btn_sel.bind(on_press=lambda x: send_msg("BTN_SELECT:DOWN"), on_release=lambda x: send_msg("BTN_SELECT:UP"))
+        self.layout.add_widget(btn_sel)
+
+        btn_str = Button(text="STRT", pos_hint={'center_x': 0.6, 'y': 0.02}, size_hint=(None, None), size=(dp(60), dp(40)))
+        btn_str.bind(on_press=lambda x: send_msg("BTN_START:DOWN"), on_release=lambda x: send_msg("BTN_START:UP"))
+        self.layout.add_widget(btn_str)
 
         self.add_widget(self.layout)
         
@@ -134,13 +178,15 @@ class GameScreen(Screen):
         try:
             val = accelerometer.acceleration
             if val[1] is None: return
-            # V1 Math: 90 degrees = Full Turn
             tilt = (val[1] / 9.81) * 90
             send_msg(f"STEER:{tilt:.2f}")
         except: pass
 
 class OverdriveApp(App):
     def build(self):
+        # Force the app to act like it's landscape 
+        # (This helps on some devices, but user should still rotate phone)
+        Window.rotation = 270 
         sm = ScreenManager()
         sm.add_widget(LoginScreen(name='login'))
         sm.add_widget(GameScreen(name='game'))
