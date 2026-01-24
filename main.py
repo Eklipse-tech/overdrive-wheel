@@ -11,12 +11,12 @@ from kivy.clock import Clock
 from plyer import accelerometer
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, Line
-from kivy.properties import ListProperty
+from kivy.properties import ListProperty, StringProperty
 
 # --- CONFIG ---
 Window.rotation = 0
-# Dark, pixel-grid background color
-Window.clearcolor = (0.05, 0.05, 0.07, 1)
+# Deep Void Background (Dark Sci-Fi Grey)
+Window.clearcolor = (0.05, 0.06, 0.08, 1)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 SERVER_IP = "192.168.1.5"
@@ -27,68 +27,92 @@ def send_msg(msg):
         sock.sendto(msg.encode('utf-8'), (SERVER_IP, int(SERVER_PORT)))
     except: pass
 
-# --- CUSTOM UI: PIXEL STONE BUTTON WITH PRESS ANIMATION ---
-class PixelStoneButton(Button):
-    # Color palette based on the reference image (dark stone/metal)
-    # Main body color
-    bg_col = ListProperty([0.25, 0.3, 0.35, 1])
-    # Very dark outline
-    outline_col = ListProperty([0.1, 0.12, 0.15, 1])
-    # Lighter inner border
-    inner_border_col = ListProperty([0.35, 0.4, 0.45, 1])
-    # Top 3D highlight
-    top_highlight_col = ListProperty([0.4, 0.45, 0.5, 1])
-    # Bottom 3D shadow
-    bottom_shadow_col = ListProperty([0.15, 0.18, 0.2, 1])
+# --- COLOR THEMES ---
+# Format: Main Body, Highlight Rim, Dark Shadow
+THEMES = {
+    'cyan':   ([0.0, 0.5, 0.6, 1], [0.3, 0.8, 0.9, 1], [0.0, 0.3, 0.4, 1]),
+    'red':    ([0.6, 0.1, 0.1, 1], [0.9, 0.3, 0.3, 1], [0.4, 0.0, 0.0, 1]),
+    'green':  ([0.1, 0.5, 0.1, 1], [0.3, 0.9, 0.3, 1], [0.0, 0.3, 0.0, 1]),
+    'blue':   ([0.1, 0.2, 0.7, 1], [0.3, 0.5, 1.0, 1], [0.0, 0.1, 0.4, 1]),
+    'yellow': ([0.7, 0.6, 0.0, 1], [1.0, 0.9, 0.3, 1], [0.5, 0.4, 0.0, 1]),
+    'grey':   ([0.25, 0.28, 0.32, 1],[0.45, 0.48, 0.52, 1],[0.15, 0.18, 0.22, 1])
+}
 
-    def __init__(self, text_col=(0.8, 0.85, 0.9, 1), **kwargs):
+# --- CUSTOM COMPONENT: ANIMATED PIXEL BUTTON ---
+class PixelTechButton(Button):
+    theme_key = StringProperty('cyan') 
+    
+    def __init__(self, theme='cyan', **kwargs):
         super().__init__(**kwargs)
+        self.theme_key = theme
         self.background_color = (0, 0, 0, 0)
         self.background_normal = ''
         self.background_down = ''
-        self.color = text_col
+        self.color = (1, 1, 1, 1)
         self.bold = True
-        self.bind(pos=self.draw_pixel_button, size=self.draw_pixel_button, state=self.draw_pixel_button)
+        self.bind(pos=self.draw_btn, size=self.draw_btn, state=self.draw_btn)
 
-    def draw_pixel_button(self, *args):
+    def draw_btn(self, *args):
         self.canvas.before.clear()
         
-        # Shift down when pressed for animation
-        is_pressed = self.state == 'down'
-        offset = 4 if is_pressed else 0
+        # 1. Retrieve Theme Colors
+        base, rim, shadow = THEMES.get(self.theme_key, THEMES['cyan'])
         
-        x, y = self.x, self.y - offset
+        # 2. Check Input State
+        is_down = self.state == 'down'
+        
+        # --- ANIMATION CALCULATIONS ---
+        
+        # A. Physical Shift (Sinks 4px when pressed)
+        off_y = -4 if is_down else 0
+        
+        # B. Color Boost (Light up, but NOT pure white)
+        if is_down:
+            # We add 0.3 to the RGB channels to brighten them, capping at 1.0
+            # This keeps the original hue (red stays red) but makes it glow.
+            base = [min(1.0, c + 0.25) for c in base[:3]] + [1]
+            rim  = [min(1.0, c + 0.30) for c in rim[:3]] + [1]
+            # Shadow stays dark to maintain contrast
+        
+        # Geometry Setup
+        x, y = self.x, self.y + off_y
         w, h = self.width, self.height
+        s = 8 # The size of the "cut out" corners (Chamfer)
 
         with self.canvas.before:
-            # 1. Outer Dark Outline
-            Color(*self.outline_col)
-            Rectangle(pos=(x, y), size=(w, h))
+            # LAYER 1: The Black Outline (The "Socket")
+            # We draw a cross shape to create the chamfered corners
+            Color(0.02, 0.02, 0.02, 1)
+            Rectangle(pos=(x, y + s), size=(w, h - 2*s))       # Horizontal Bar
+            Rectangle(pos=(x + s, y), size=(w - 2*s, h))       # Vertical Bar
+            Rectangle(pos=(x + s, y + s), size=(w - 2*s, h - 2*s)) # Center Fill
 
-            # 2. Main Body (slightly smaller)
-            Color(*self.bg_col)
-            Rectangle(pos=(x + 4, y + 4), size=(w - 8, h - 8))
+            # LAYER 2: The Main Colored Body
+            # Drawn slightly smaller to sit inside the black outline
+            Color(*base)
+            Rectangle(pos=(x + 4, y + s + 4), size=(w - 8, h - 2*s - 8))
+            Rectangle(pos=(x + s + 4, y + 4), size=(w - 2*s - 8, h - 8))
 
-            # 3. Inner Lighter Border (a few pixels inside)
-            Color(*self.inner_border_col)
-            Line(rectangle=(x + 6, y + 6, w - 12, h - 12), width=2)
+            # LAYER 3: The Highlights (Rim)
+            # Top "Bevel"
+            Color(*rim)
+            Rectangle(pos=(x + s + 4, y + h - s - 4), size=(w - 2*s - 8, 4))
+            
+            # LAYER 4: The Shadows
+            # Bottom "Bevel"
+            Color(*shadow)
+            Rectangle(pos=(x + s + 4, y + s), size=(w - 2*s - 8, 4))
 
-            # 4. 3D Effects (Top Highlight & Bottom Shadow)
-            # Top Highlight
-            Color(*self.top_highlight_col)
-            Rectangle(pos=(x + 4, y + h - 8), size=(w - 8, 4))
-            # Bottom Shadow
-            Color(*self.bottom_shadow_col)
-            Rectangle(pos=(x + 4, y + 4), size=(w - 8, 4))
+            # LAYER 5: Corner Detail Pixels (Smoothing the chamfer)
+            # Small squares in the corners to join the vertical/horizontal bars
+            Color(*base) 
+            Rectangle(pos=(x + s, y + s), size=(4, 4))
+            Rectangle(pos=(x + w - s - 4, y + s), size=(4, 4))
+            Rectangle(pos=(x + s, y + h - s - 4), size=(4, 4))
+            Rectangle(pos=(x + w - s - 4, y + h - s - 4), size=(4, 4))
 
-# --- CUSTOM UI: SUNKEN PIXEL TRACKPAD ---
-class TouchPad(Label):
-    # Palette for sunken pad (reversed highlights/shadows)
-    bg_col = ListProperty([0.15, 0.18, 0.2, 1])
-    outline_col = ListProperty([0.1, 0.12, 0.15, 1])
-    inner_shadow_col = ListProperty([0.1, 0.12, 0.15, 1])
-    bottom_highlight_col = ListProperty([0.25, 0.3, 0.35, 1])
-
+# --- CUSTOM COMPONENT: TACTICAL TOUCHPAD ---
+class TechTouchPad(Label):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.bind(pos=self.draw_pad, size=self.draw_pad)
@@ -97,53 +121,50 @@ class TouchPad(Label):
         self.canvas.before.clear()
         x, y = self.x, self.y
         w, h = self.width, self.height
-        
+        s = 10 # Larger chamfer for the pad
+
         with self.canvas.before:
-            # 1. Outer Outline
-            Color(*self.outline_col)
-            Rectangle(pos=(x, y), size=(w, h))
+            # 1. Background (Dark Void)
+            Color(0.02, 0.02, 0.02, 1)
+            Rectangle(pos=(x, y + s), size=(w, h - 2*s))
+            Rectangle(pos=(x + s, y), size=(w - 2*s, h))
             
-            # 2. Main Sunken Body
-            Color(*self.bg_col)
-            Rectangle(pos=(x + 4, y + 4), size=(w - 8, h - 8))
+            # 2. Sunken Surface (Dark Slate)
+            Color(0.12, 0.14, 0.16, 1)
+            Rectangle(pos=(x + 4, y + s), size=(w - 8, h - 2*s))
+            Rectangle(pos=(x + s, y + 4), size=(w - 2*s, h - 8))
 
-            # 3. Inner Shadow (Top/Left)
-            Color(*self.inner_shadow_col)
-            Rectangle(pos=(x + 4, y + h - 8), size=(w - 8, 4))
-            Rectangle(pos=(x + 4, y + 4), size=(4, h - 8))
-
-            # 4. Bottom/Right Highlight
-            Color(*self.bottom_highlight_col)
-            Rectangle(pos=(x + 4, y + 4), size=(w - 8, 4))
-            Rectangle(pos=(x + w - 8, y + 4), size=(4, h - 8))
+            # 3. Tactical Crosshair Grid
+            Color(0.2, 0.25, 0.3, 1)
+            # Center Vertical Line
+            Line(points=[x + w/2, y + 15, x + w/2, y + h - 15], width=1.5)
+            # Center Horizontal Line
+            Line(points=[x + 15, y + h/2, x + w - 15, y + h/2], width=1.5)
 
     def on_touch_move(self, touch):
         if self.collide_point(*touch.pos):
             send_msg(f"MOUSE_MOVE:{touch.dx},{touch.dy}")
 
+# --- SCREEN 1: LOGIN ---
 class LoginScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         layout = BoxLayout(orientation='vertical', padding=50, spacing=20)
         
-        # Pixel-style title
-        layout.add_widget(Label(text="CONNECT TO PC", font_size=40, bold=True, color=(0.8, 0.85, 0.9, 1)))
+        # Title
+        layout.add_widget(Label(text="SYSTEM LINK", font_size=40, bold=True, color=(0.3, 0.8, 0.9, 1)))
         
-        # Pixel-style inputs
+        # Inputs
         self.ip_input = TextInput(text="192.168.", multiline=False, font_size=30, size_hint=(1, 0.2),
-                                  background_color=(0.15, 0.18, 0.2, 1), foreground_color=(0.8, 0.85, 0.9, 1), cursor_color=(0.8, 0.85, 0.9, 1))
+                                  background_color=(0.1, 0.12, 0.15, 1), foreground_color=(0.3, 0.8, 0.9, 1), cursor_color=(1,1,1,1))
         layout.add_widget(self.ip_input)
         
         self.port_input = TextInput(text="5000", multiline=False, font_size=30, size_hint=(1, 0.2),
-                                    background_color=(0.15, 0.18, 0.2, 1), foreground_color=(0.8, 0.85, 0.9, 1), cursor_color=(0.8, 0.85, 0.9, 1))
+                                    background_color=(0.1, 0.12, 0.15, 1), foreground_color=(0.3, 0.8, 0.9, 1))
         layout.add_widget(self.port_input)
         
-        # Pixel Stone Start Button
-        btn = PixelStoneButton(text="START ENGINE", font_size=30, size_hint=(1, 0.3))
-        # Override color for the start button
-        btn.bg_col = [0.2, 0.4, 0.6, 1]
-        btn.inner_border_col = [0.3, 0.5, 0.7, 1]
-        btn.top_highlight_col = [0.4, 0.6, 0.8, 1]
+        # Connect Button (Big Cyan Button)
+        btn = PixelTechButton(text="INITIALIZE", theme='cyan', font_size=30, size_hint=(1, 0.3))
         btn.bind(on_press=self.connect)
         layout.add_widget(btn)
         self.add_widget(layout)
@@ -154,65 +175,56 @@ class LoginScreen(Screen):
         SERVER_PORT = self.port_input.text
         self.manager.current = 'game'
 
+# --- SCREEN 2: GAMEPAD ---
 class GameScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.layout = FloatLayout()
         
-        # GYRO
+        # 1. GYRO TOGGLE
         self.gyro_active = True
         sw = Switch(active=True, size_hint=(None, None), size=(100, 50), pos_hint={'center_x': 0.5, 'top': 0.95})
         sw.bind(active=self.toggle_gyro)
         self.layout.add_widget(sw)
 
-        # TOUCHPAD (Sunken Pixel Style)
-        tp = TouchPad(text="TOUCHPAD", color=(0.5, 0.55, 0.6, 1), 
-                      pos_hint={'center_x': 0.5, 'center_y': 0.55}, 
-                      size_hint=(0.25, 0.35))
+        # 2. TOUCHPAD (Center)
+        tp = TechTouchPad(text="TRACK", pos_hint={'center_x': 0.5, 'center_y': 0.55}, size_hint=(0.25, 0.35))
         self.layout.add_widget(tp)
 
-        # MOUSE BUTTONS
-        def make_btn(text, pos, size, cmd, bg_override=None):
-            btn = PixelStoneButton(text=text, pos_hint=pos, size_hint=size)
-            if bg_override:
-                btn.bg_col = bg_override[0]
-                btn.inner_border_col = bg_override[1]
-                btn.top_highlight_col = bg_override[2]
-
+        # HELPER TO MAKE BUTTONS
+        def make_btn(text, pos, size, cmd, theme='grey'):
+            btn = PixelTechButton(text=text, theme=theme, pos_hint=pos, size_hint=size)
             btn.bind(on_press=lambda x: send_msg(f"{cmd}:DOWN"))
             btn.bind(on_release=lambda x: send_msg(f"{cmd}:UP"))
             self.layout.add_widget(btn)
 
-        make_btn("LMB", {'right': 0.49, 'top': 0.36}, (0.12, 0.12), "LMB")
-        make_btn("RMB", {'x': 0.51, 'top': 0.36}, (0.12, 0.12), "RMB")
+        # 3. MOUSE CLICKS (Cyan - Matches Touchpad theme)
+        make_btn("LMB", {'right': 0.49, 'top': 0.36}, (0.12, 0.12), "LMB", theme='cyan')
+        make_btn("RMB", {'x': 0.51, 'top': 0.36}, (0.12, 0.12), "RMB", theme='cyan')
 
-        # CONTROLS
-        # Red Brake Pedal
-        brake_cols = ([0.5, 0.2, 0.2, 1], [0.6, 0.3, 0.3, 1], [0.7, 0.4, 0.4, 1])
-        make_btn("BRAKE", {'x': 0.02, 'top': 0.98}, (0.3, 0.25), "BTN_LB", bg_override=brake_cols)
+        # 4. PEDALS (Gas=Green, Brake=Red)
+        make_btn("BRAKE", {'x': 0.02, 'top': 0.98}, (0.3, 0.25), "BTN_LB", theme='red')
+        make_btn("GAS", {'right': 0.98, 'top': 0.98}, (0.3, 0.25), "BTN_RB", theme='green')
+
+        # 5. FACE BUTTONS (Xbox/Snes Colors)
+        make_btn("Y", {'right': 0.85, 'y': 0.45}, (0.08, 0.15), "BTN_Y", theme='yellow')
+        make_btn("A", {'right': 0.85, 'y': 0.10}, (0.08, 0.15), "BTN_A", theme='green')
+        make_btn("X", {'right': 0.94, 'y': 0.28}, (0.08, 0.15), "BTN_X", theme='blue')
+        make_btn("B", {'right': 0.76, 'y': 0.28}, (0.08, 0.15), "BTN_B", theme='red')
+
+        # 6. D-PAD (Industrial Grey)
+        make_btn("U", {'x': 0.13, 'y': 0.45}, (0.08, 0.15), "BTN_UP", theme='grey')
+        make_btn("D", {'x': 0.13, 'y': 0.10}, (0.08, 0.15), "BTN_DOWN", theme='grey')
+        make_btn("L", {'x': 0.04, 'y': 0.28}, (0.08, 0.15), "BTN_LEFT", theme='grey')
+        make_btn("R", {'x': 0.22, 'y': 0.28}, (0.08, 0.15), "BTN_RIGHT", theme='grey')
         
-        # Green Gas Pedal
-        gas_cols = ([0.2, 0.5, 0.2, 1], [0.3, 0.6, 0.3, 1], [0.4, 0.7, 0.4, 1])
-        make_btn("GAS", {'right': 0.98, 'top': 0.98}, (0.3, 0.25), "BTN_RB", bg_override=gas_cols)
-
-        # Pixel ABXY
-        make_btn("Y", {'right': 0.85, 'y': 0.45}, (0.08, 0.15), "BTN_Y")
-        make_btn("A", {'right': 0.85, 'y': 0.10}, (0.08, 0.15), "BTN_A")
-        make_btn("X", {'right': 0.94, 'y': 0.28}, (0.08, 0.15), "BTN_X")
-        make_btn("B", {'right': 0.76, 'y': 0.28}, (0.08, 0.15), "BTN_B")
-
-        # Pixel DPAD
-        make_btn("U", {'x': 0.13, 'y': 0.45}, (0.08, 0.15), "BTN_UP")
-        make_btn("D", {'x': 0.13, 'y': 0.10}, (0.08, 0.15), "BTN_DOWN")
-        make_btn("L", {'x': 0.04, 'y': 0.28}, (0.08, 0.15), "BTN_LEFT")
-        make_btn("R", {'x': 0.22, 'y': 0.28}, (0.08, 0.15), "BTN_RIGHT")
-        
-        # Pixel Start/Select
-        make_btn("SLCT", {'center_x': 0.4, 'y': 0.05}, (0.15, 0.1), "BTN_SELECT")
-        make_btn("STRT", {'center_x': 0.6, 'y': 0.05}, (0.15, 0.1), "BTN_START")
+        # 7. MENU BUTTONS
+        make_btn("SLCT", {'center_x': 0.4, 'y': 0.05}, (0.15, 0.1), "BTN_SELECT", theme='grey')
+        make_btn("STRT", {'center_x': 0.6, 'y': 0.05}, (0.15, 0.1), "BTN_START", theme='grey')
 
         self.add_widget(self.layout)
         
+        # 8. ACCELEROMETER LOGIC
         try:
             accelerometer.enable()
             Clock.schedule_interval(self.update_gyro, 1.0 / 60.0)
