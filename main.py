@@ -1,22 +1,21 @@
 import socket
+import math
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.widget import Widget
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
-from kivy.uix.switch import Switch
-from kivy.clock import Clock
-from plyer import accelerometer
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, Line
-from kivy.properties import ListProperty, StringProperty
+from kivy.properties import StringProperty, OptionProperty
+from kivy.clock import Clock
 
 # --- CONFIG ---
 Window.rotation = 0
-# Deep Void Background (Dark Sci-Fi Grey)
-Window.clearcolor = (0.05, 0.06, 0.08, 1)
+Window.clearcolor = (0.05, 0.06, 0.08, 1) # Sci-Fi Dark
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 SERVER_IP = "192.168.1.5"
@@ -27,221 +26,261 @@ def send_msg(msg):
         sock.sendto(msg.encode('utf-8'), (SERVER_IP, int(SERVER_PORT)))
     except: pass
 
-# --- COLOR THEMES ---
-# Format: Main Body, Highlight Rim, Dark Shadow
+# --- THEMES ---
 THEMES = {
-    'cyan':   ([0.0, 0.5, 0.6, 1], [0.3, 0.8, 0.9, 1], [0.0, 0.3, 0.4, 1]),
-    'red':    ([0.6, 0.1, 0.1, 1], [0.9, 0.3, 0.3, 1], [0.4, 0.0, 0.0, 1]),
-    'green':  ([0.1, 0.5, 0.1, 1], [0.3, 0.9, 0.3, 1], [0.0, 0.3, 0.0, 1]),
-    'blue':   ([0.1, 0.2, 0.7, 1], [0.3, 0.5, 1.0, 1], [0.0, 0.1, 0.4, 1]),
-    'yellow': ([0.7, 0.6, 0.0, 1], [1.0, 0.9, 0.3, 1], [0.5, 0.4, 0.0, 1]),
-    'grey':   ([0.25, 0.28, 0.32, 1],[0.45, 0.48, 0.52, 1],[0.15, 0.18, 0.22, 1])
+    'cyan':   ([0.0, 0.6, 0.7, 1], [0.4, 0.9, 1.0, 1], [0.0, 0.3, 0.4, 1]),
+    'red':    ([0.7, 0.1, 0.1, 1], [1.0, 0.4, 0.4, 1], [0.4, 0.0, 0.0, 1]),
+    'green':  ([0.1, 0.6, 0.1, 1], [0.4, 1.0, 0.4, 1], [0.0, 0.3, 0.0, 1]),
+    'blue':   ([0.1, 0.3, 0.8, 1], [0.4, 0.6, 1.0, 1], [0.0, 0.1, 0.4, 1]),
+    'yellow': ([0.8, 0.7, 0.0, 1], [1.0, 0.9, 0.3, 1], [0.5, 0.4, 0.0, 1]),
+    'grey':   ([0.25, 0.28, 0.32, 1],[0.45, 0.48, 0.52, 1],[0.15, 0.18, 0.22, 1]),
+    'dark':   ([0.1, 0.1, 0.12, 1], [0.2, 0.2, 0.25, 1], [0.05, 0.05, 0.08, 1])
 }
 
-# --- CUSTOM COMPONENT: ANIMATED PIXEL BUTTON ---
+# --- HELPER: DRAW CHAMFERED RECT ---
+def draw_chamfer_rect(canvas, x, y, w, h, s, base, rim, shadow):
+    with canvas:
+        Color(0.02, 0.02, 0.02, 1) # Outline
+        Rectangle(pos=(x, y+s), size=(w, h-2*s))
+        Rectangle(pos=(x+s, y), size=(w-2*s, h))
+        Rectangle(pos=(x+s, y+s), size=(w-2*s, h-2*s))
+        
+        Color(*base) # Body
+        Rectangle(pos=(x+4, y+s+4), size=(w-8, h-2*s-8))
+        Rectangle(pos=(x+s+4, y+4), size=(w-2*s-8, h-8))
+        
+        Color(*rim) # Highlight
+        Rectangle(pos=(x+s+4, y+h-s-4), size=(w-2*s-8, 4))
+        
+        Color(*shadow) # Shadow
+        Rectangle(pos=(x+s+4, y+s), size=(w-2*s-8, 4))
+        
+        Color(*base) # Corners
+        Rectangle(pos=(x+s, y+s), size=(4, 4))
+        Rectangle(pos=(x+w-s-4, y+s), size=(4, 4))
+        Rectangle(pos=(x+s, y+h-s-4), size=(4, 4))
+        Rectangle(pos=(x+w-s-4, y+h-s-4), size=(4, 4))
+
+# --- WIDGET 1: PIXEL TECH BUTTON ---
 class PixelTechButton(Button):
-    theme_key = StringProperty('cyan') 
-    
-    def __init__(self, theme='cyan', **kwargs):
+    theme_key = StringProperty('grey') 
+    def __init__(self, theme='grey', **kwargs):
         super().__init__(**kwargs)
         self.theme_key = theme
-        self.background_color = (0, 0, 0, 0)
+        self.background_color = (0,0,0,0)
         self.background_normal = ''
-        self.background_down = ''
-        self.color = (1, 1, 1, 1)
-        self.bold = True
         self.bind(pos=self.draw_btn, size=self.draw_btn, state=self.draw_btn)
 
     def draw_btn(self, *args):
         self.canvas.before.clear()
-        
-        # 1. Retrieve Theme Colors
-        base, rim, shadow = THEMES.get(self.theme_key, THEMES['cyan'])
-        
-        # 2. Check Input State
+        base, rim, shadow = THEMES.get(self.theme_key, THEMES['grey'])
         is_down = self.state == 'down'
-        
-        # --- ANIMATION CALCULATIONS ---
-        
-        # A. Physical Shift (Sinks 4px when pressed)
         off_y = -4 if is_down else 0
         
-        # B. Color Boost (Light up, but NOT pure white)
         if is_down:
-            # We add 0.3 to the RGB channels to brighten them, capping at 1.0
-            # This keeps the original hue (red stays red) but makes it glow.
-            base = [min(1.0, c + 0.25) for c in base[:3]] + [1]
-            rim  = [min(1.0, c + 0.30) for c in rim[:3]] + [1]
-            # Shadow stays dark to maintain contrast
-        
-        # Geometry Setup
-        x, y = self.x, self.y + off_y
-        w, h = self.width, self.height
-        s = 8 # The size of the "cut out" corners (Chamfer)
+            base = [min(1.0, c + 0.2) for c in base]
+            rim  = [min(1.0, c + 0.2) for c in rim]
 
-        with self.canvas.before:
-            # LAYER 1: The Black Outline (The "Socket")
-            # We draw a cross shape to create the chamfered corners
-            Color(0.02, 0.02, 0.02, 1)
-            Rectangle(pos=(x, y + s), size=(w, h - 2*s))       # Horizontal Bar
-            Rectangle(pos=(x + s, y), size=(w - 2*s, h))       # Vertical Bar
-            Rectangle(pos=(x + s, y + s), size=(w - 2*s, h - 2*s)) # Center Fill
+        draw_chamfer_rect(self.canvas.before, self.x, self.y + off_y, self.width, self.height, 8, base, rim, shadow)
 
-            # LAYER 2: The Main Colored Body
-            # Drawn slightly smaller to sit inside the black outline
-            Color(*base)
-            Rectangle(pos=(x + 4, y + s + 4), size=(w - 8, h - 2*s - 8))
-            Rectangle(pos=(x + s + 4, y + 4), size=(w - 2*s - 8, h - 8))
-
-            # LAYER 3: The Highlights (Rim)
-            # Top "Bevel"
-            Color(*rim)
-            Rectangle(pos=(x + s + 4, y + h - s - 4), size=(w - 2*s - 8, 4))
-            
-            # LAYER 4: The Shadows
-            # Bottom "Bevel"
-            Color(*shadow)
-            Rectangle(pos=(x + s + 4, y + s), size=(w - 2*s - 8, 4))
-
-            # LAYER 5: Corner Detail Pixels (Smoothing the chamfer)
-            # Small squares in the corners to join the vertical/horizontal bars
-            Color(*base) 
-            Rectangle(pos=(x + s, y + s), size=(4, 4))
-            Rectangle(pos=(x + w - s - 4, y + s), size=(4, 4))
-            Rectangle(pos=(x + s, y + h - s - 4), size=(4, 4))
-            Rectangle(pos=(x + w - s - 4, y + h - s - 4), size=(4, 4))
-
-# --- CUSTOM COMPONENT: TACTICAL TOUCHPAD ---
-class TechTouchPad(Label):
+# --- WIDGET 2: DUAL-MODE JOYSTICK ---
+class TechJoystick(Widget):
+    # Mode: 'keys' (WASD/Arrows) OR 'mouse' (Camera Look)
+    mode = OptionProperty('keys', options=['keys', 'mouse'])
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw_pad, size=self.draw_pad)
+        self.size_hint = (None, None)
+        self.outer_size = 300
+        self.stick_size = 120
+        self.size = (self.outer_size, self.outer_size)
+        
+        self.active_keys = {'UP': False, 'DOWN': False, 'LEFT': False, 'RIGHT': False}
+        self.stick_pos = None
+        self.is_touched = False
+        
+        self.bind(pos=self.update_canvas, size=self.update_canvas)
+        Clock.schedule_interval(self.network_loop, 1.0 / 60.0)
 
-    def draw_pad(self, *args):
-        self.canvas.before.clear()
-        x, y = self.x, self.y
-        w, h = self.width, self.height
-        s = 10 # Larger chamfer for the pad
+    def network_loop(self, dt):
+        if not self.is_touched or self.stick_pos is None: return
 
-        with self.canvas.before:
-            # 1. Background (Dark Void)
-            Color(0.02, 0.02, 0.02, 1)
-            Rectangle(pos=(x, y + s), size=(w, h - 2*s))
-            Rectangle(pos=(x + s, y), size=(w - 2*s, h))
+        # Calculate normalized X/Y (-1.0 to 1.0)
+        bx, by = self.pos
+        sx, sy = self.stick_pos
+        
+        # Center of base
+        cx = bx + (self.outer_size / 2)
+        cy = by + (self.outer_size / 2)
+        
+        # Center of stick
+        scx = sx + (self.stick_size / 2)
+        scy = sy + (self.stick_size / 2)
+        
+        dx = scx - cx
+        dy = scy - cy
+        
+        max_dist = (self.outer_size / 2) - (self.stick_size / 2)
+        norm_x = dx / max_dist
+        norm_y = dy / max_dist
+
+        if self.mode == 'mouse':
+            # MOUSE MODE: Send relative movement scaling
+            speed = 25.0 # Sensitivity
+            mx = int(norm_x * speed)
+            my = int(norm_y * speed)
+            if abs(mx) > 0 or abs(my) > 0:
+                send_msg(f"MOUSE_MOVE:{mx},{my}")
+        
+        else:
+            # KEY MODE: Send UP/DOWN/LEFT/RIGHT signals
+            threshold = 0.3
+            new_keys = {
+                'UP': norm_y > threshold,
+                'DOWN': norm_y < -threshold,
+                'RIGHT': norm_x > threshold,
+                'LEFT': norm_x < -threshold
+            }
+            # Only send changes to avoid spamming network too hard
+            for k, v in new_keys.items():
+                if v and not self.active_keys[k]:
+                    send_msg(f"{k}:DOWN")
+                elif not v and self.active_keys[k]:
+                    send_msg(f"{k}:UP")
+                self.active_keys[k] = v
+
+    def update_canvas(self, *args):
+        self.canvas.clear()
+        bx, by = self.pos
+        draw_chamfer_rect(self.canvas, bx, by, self.outer_size, self.outer_size, 15, *THEMES['dark'])
+        
+        if self.stick_pos is None:
+            sx = bx + (self.outer_size - self.stick_size)/2
+            sy = by + (self.outer_size - self.stick_size)/2
+        else:
+            sx, sy = self.stick_pos
             
-            # 2. Sunken Surface (Dark Slate)
-            Color(0.12, 0.14, 0.16, 1)
-            Rectangle(pos=(x + 4, y + s), size=(w - 8, h - 2*s))
-            Rectangle(pos=(x + s, y + 4), size=(w - 2*s, h - 8))
+        theme = THEMES['cyan'] if self.mode == 'mouse' else THEMES['grey']
+        draw_chamfer_rect(self.canvas, sx, sy, self.stick_size, self.stick_size, 10, *theme)
 
-            # 3. Tactical Crosshair Grid
-            Color(0.2, 0.25, 0.3, 1)
-            # Center Vertical Line
-            Line(points=[x + w/2, y + 15, x + w/2, y + h - 15], width=1.5)
-            # Center Horizontal Line
-            Line(points=[x + 15, y + h/2, x + w - 15, y + h/2], width=1.5)
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self)
+            self.is_touched = True
+            self.update_stick(touch)
+            return True
 
     def on_touch_move(self, touch):
-        if self.collide_point(*touch.pos):
-            send_msg(f"MOUSE_MOVE:{touch.dx},{touch.dy}")
+        if touch.grab_current is self:
+            self.update_stick(touch)
+            return True
 
-# --- SCREEN 1: LOGIN ---
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            self.is_touched = False
+            self.reset_stick()
+            if self.mode == 'keys':
+                for k in self.active_keys:
+                    if self.active_keys[k]:
+                        send_msg(f"{k}:UP")
+                        self.active_keys[k] = False
+            return True
+
+    def reset_stick(self):
+        self.stick_pos = None
+        self.update_canvas()
+
+    def update_stick(self, touch):
+        cx = self.x + (self.width / 2)
+        cy = self.y + (self.height / 2)
+        dx = touch.x - cx
+        dy = touch.y - cy
+        dist = math.sqrt(dx**2 + dy**2)
+        max_dist = (self.width / 2) - (self.stick_size / 2)
+        
+        if dist > max_dist:
+            scale = max_dist / dist
+            dx *= scale
+            dy *= scale
+            
+        self.stick_pos = (cx + dx - self.stick_size/2, cy + dy - self.stick_size/2)
+        self.update_canvas()
+
+
 class LoginScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=50, spacing=20)
+        layout = BoxLayout(orientation='vertical', padding=80, spacing=30)
+        layout.add_widget(Label(text="CONTROLLER LINK", font_size='40sp', bold=True, color=THEMES['cyan'][1]))
         
-        # Title
-        layout.add_widget(Label(text="SYSTEM LINK", font_size=40, bold=True, color=(0.3, 0.8, 0.9, 1)))
-        
-        # Inputs
-        self.ip_input = TextInput(text="192.168.", multiline=False, font_size=30, size_hint=(1, 0.2),
-                                  background_color=(0.1, 0.12, 0.15, 1), foreground_color=(0.3, 0.8, 0.9, 1), cursor_color=(1,1,1,1))
+        self.ip_input = TextInput(text="192.168.", multiline=False, font_size='30sp', size_hint=(1, 0.25),
+                                  background_color=(0.1, 0.12, 0.15, 1), foreground_color=THEMES['cyan'][1])
         layout.add_widget(self.ip_input)
         
-        self.port_input = TextInput(text="5000", multiline=False, font_size=30, size_hint=(1, 0.2),
-                                    background_color=(0.1, 0.12, 0.15, 1), foreground_color=(0.3, 0.8, 0.9, 1))
-        layout.add_widget(self.port_input)
-        
-        # Connect Button (Big Cyan Button)
-        btn = PixelTechButton(text="INITIALIZE", theme='cyan', font_size=30, size_hint=(1, 0.3))
+        btn = PixelTechButton(text="CONNECT", theme='cyan', font_size='30sp', size_hint=(1, 0.3))
         btn.bind(on_press=self.connect)
         layout.add_widget(btn)
         self.add_widget(layout)
 
     def connect(self, instance):
-        global SERVER_IP, SERVER_PORT
+        global SERVER_IP
         SERVER_IP = self.ip_input.text
-        SERVER_PORT = self.port_input.text
         self.manager.current = 'game'
 
-# --- SCREEN 2: GAMEPAD ---
 class GameScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.layout = FloatLayout()
         
-        # 1. GYRO TOGGLE
-        self.gyro_active = True
-        sw = Switch(active=True, size_hint=(None, None), size=(100, 50), pos_hint={'center_x': 0.5, 'top': 0.95})
-        sw.bind(active=self.toggle_gyro)
-        self.layout.add_widget(sw)
-
-        # 2. TOUCHPAD (Center)
-        tp = TechTouchPad(text="TRACK", pos_hint={'center_x': 0.5, 'center_y': 0.55}, size_hint=(0.25, 0.35))
-        self.layout.add_widget(tp)
-
-        # HELPER TO MAKE BUTTONS
-        def make_btn(text, pos, size, cmd, theme='grey'):
-            btn = PixelTechButton(text=text, theme=theme, pos_hint=pos, size_hint=size)
-            btn.bind(on_press=lambda x: send_msg(f"{cmd}:DOWN"))
-            btn.bind(on_release=lambda x: send_msg(f"{cmd}:UP"))
-            self.layout.add_widget(btn)
-
-        # 3. MOUSE CLICKS (Cyan - Matches Touchpad theme)
-        make_btn("LMB", {'right': 0.49, 'top': 0.36}, (0.12, 0.12), "LMB", theme='cyan')
-        make_btn("RMB", {'x': 0.51, 'top': 0.36}, (0.12, 0.12), "RMB", theme='cyan')
-
-        # 4. PEDALS (Gas=Green, Brake=Red)
-        make_btn("BRAKE", {'x': 0.02, 'top': 0.98}, (0.3, 0.25), "BTN_LB", theme='red')
-        make_btn("GAS", {'right': 0.98, 'top': 0.98}, (0.3, 0.25), "BTN_RB", theme='green')
-
-        # 5. FACE BUTTONS (Xbox/Snes Colors)
-        make_btn("Y", {'right': 0.85, 'y': 0.45}, (0.08, 0.15), "BTN_Y", theme='yellow')
-        make_btn("A", {'right': 0.85, 'y': 0.10}, (0.08, 0.15), "BTN_A", theme='green')
-        make_btn("X", {'right': 0.94, 'y': 0.28}, (0.08, 0.15), "BTN_X", theme='blue')
-        make_btn("B", {'right': 0.76, 'y': 0.28}, (0.08, 0.15), "BTN_B", theme='red')
-
-        # 6. D-PAD (Industrial Grey)
-        make_btn("U", {'x': 0.13, 'y': 0.45}, (0.08, 0.15), "BTN_UP", theme='grey')
-        make_btn("D", {'x': 0.13, 'y': 0.10}, (0.08, 0.15), "BTN_DOWN", theme='grey')
-        make_btn("L", {'x': 0.04, 'y': 0.28}, (0.08, 0.15), "BTN_LEFT", theme='grey')
-        make_btn("R", {'x': 0.22, 'y': 0.28}, (0.08, 0.15), "BTN_RIGHT", theme='grey')
+        # --- TOP ROW (TRIGGERS & BUMPERS) ---
+        # L2 (Trigger)
+        self.make_btn("LT", {'x': 0.02, 'top': 0.98}, (0.2, 0.15), "BTN_LB", 'red')
+        # L1 (Bumper)
+        self.make_btn("LB", {'x': 0.02, 'top': 0.82}, (0.2, 0.12), "BTN_L1", 'red')
         
-        # 7. MENU BUTTONS
-        make_btn("SLCT", {'center_x': 0.4, 'y': 0.05}, (0.15, 0.1), "BTN_SELECT", theme='grey')
-        make_btn("STRT", {'center_x': 0.6, 'y': 0.05}, (0.15, 0.1), "BTN_START", theme='grey')
+        # R2 (Trigger)
+        self.make_btn("RT", {'right': 0.98, 'top': 0.98}, (0.2, 0.15), "BTN_RB", 'green')
+        # R1 (Bumper)
+        self.make_btn("RB", {'right': 0.98, 'top': 0.82}, (0.2, 0.12), "BTN_R1", 'green')
+
+        # --- LEFT SIDE (MOVEMENT) ---
+        # Left Stick (WASD)
+        self.l_stick = TechJoystick(mode='keys', pos_hint={'x': 0.08, 'center_y': 0.4})
+        self.layout.add_widget(self.l_stick)
+        
+        # D-Pad (Small, tucked between Stick and Center)
+        dp_size = (0.07, 0.12)
+        self.make_btn("U", {'x': 0.38, 'y': 0.30}, dp_size, "BTN_UP", 'grey')
+        self.make_btn("D", {'x': 0.38, 'y': 0.04}, dp_size, "BTN_DOWN", 'grey')
+        self.make_btn("L", {'x': 0.32, 'y': 0.17}, dp_size, "BTN_LEFT", 'grey')
+        self.make_btn("R", {'x': 0.44, 'y': 0.17}, dp_size, "BTN_RIGHT", 'grey')
+
+        # --- RIGHT SIDE (ACTION) ---
+        # Right Stick (Mouse/Camera)
+        self.r_stick = TechJoystick(mode='mouse', pos_hint={'right': 0.92, 'center_y': 0.35})
+        # Note: We need to override size for the right stick to make it slightly smaller if desired, 
+        # but standard size is fine. 
+        self.layout.add_widget(self.r_stick)
+
+        # Face Buttons (ABXY) - Positioned above Right Stick
+        fb_size = (0.09, 0.14)
+        self.make_btn("Y", {'right': 0.75, 'top': 0.85}, fb_size, "BTN_Y", 'yellow')
+        self.make_btn("B", {'right': 0.65, 'top': 0.70}, fb_size, "BTN_B", 'red')
+        self.make_btn("X", {'right': 0.85, 'top': 0.70}, fb_size, "BTN_X", 'blue')
+        self.make_btn("A", {'right': 0.75, 'top': 0.55}, fb_size, "BTN_A", 'green')
+
+        # --- CENTER (MENU) ---
+        self.make_btn("SELECT", {'center_x': 0.42, 'top': 0.95}, (0.15, 0.1), "BTN_SELECT", 'grey')
+        self.make_btn("START",  {'center_x': 0.58, 'top': 0.95}, (0.15, 0.1), "BTN_START", 'grey')
 
         self.add_widget(self.layout)
-        
-        # 8. ACCELEROMETER LOGIC
-        try:
-            accelerometer.enable()
-            Clock.schedule_interval(self.update_gyro, 1.0 / 60.0)
-        except: print("No sensor")
 
-    def toggle_gyro(self, instance, value):
-        self.gyro_active = value
-        if not value: send_msg("STEER:0")
-
-    def update_gyro(self, dt):
-        if not self.gyro_active: return
-        try:
-            val = accelerometer.acceleration
-            if val[1] is None: return
-            tilt = (val[1] / 9.81) * 90
-            send_msg(f"STEER:{tilt:.2f}")
-        except: pass
+    def make_btn(self, text, pos, size, cmd, theme='grey'):
+        btn = PixelTechButton(text=text, theme=theme, pos_hint=pos, size_hint=size, font_size='18sp')
+        btn.bind(on_press=lambda x: send_msg(f"{cmd}:DOWN"))
+        btn.bind(on_release=lambda x: send_msg(f"{cmd}:UP"))
+        self.layout.add_widget(btn)
 
 class ControllerApp(App):
     def build(self):
