@@ -4,7 +4,7 @@ title = Overdrive
 # (str) Package name
 package.name = overdrive
 # (str) Package domain (needed for android/ios packaging)
-package.domain = org.test
+package.domain = org.xboxcontfull
 # (str) Source code where the main.py live
 source.dir = .
 # (str) Source code filename (let empty to use all the files)
